@@ -118,7 +118,9 @@ jobs:
 
       - name: Terraform Apply
         run: terraform apply -auto-approve tfplan
-          # Step 9: Optional Notification (SNS / Slack)
+
+        
+      # Step 9: Optional Notification (SNS / Slack)
       # -----------------------------
       - name: Notify Deployment Complete
         if: success()
