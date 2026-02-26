@@ -167,7 +167,7 @@ vpc_cidr                      = "10.0.0.0/16"
 public_subnet_cidrs          = ["10.0.1.0/24", "10.0.2.0/24"]
 private_subnet_cidrs         = ["10.0.10.0/24", "10.0.11.0/24"]
 project_name                 = "snapshot-cleanup"
-notification_email           = "ops@company.com"
+notification_email           = "pennymac-ops@pennymac.com"
 cleanup_schedule_expression  = "cron(0 2 * * ? *)"
 
 The schedule expression "cron(0 2 * * ? *)" represents 2 AM UTC daily.
@@ -496,7 +496,7 @@ subscribers by creating subscriptions to the SNS topic:
 aws sns subscribe \
   --topic-arn arn:aws:sns:us-east-1:123456789012:snapshot-cleanup-prod-ec2-cleanup-topic \
   --protocol email \
-  --notification-endpoint ops-team@company.com
+  --notification-endpoint pennymac-ops-team@pennymac.com
 
 CloudWatch Alarms
 
