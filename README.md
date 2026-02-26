@@ -1,3 +1,74 @@
+The Chosen IaC Tool: Terraform
+We utilize Terraform for this implementation due to:
+
+State Management: Securely tracks resource metadata and dependencies via an encrypted S3 backend with DynamoDB locking.
+
+Provider Ecosystem: Robust support for AWS and third-party security scanners like Checkov and TFSec.
+
+Declarative Syntax: Ensures the infrastructure reflects the exact "desired state" defined in the .tf files.
+
+Modular Scalability: Easily replicable across dev, stage, and prod environments.
+
+🏗 2. High-Level Architecture & Design
+Infrastructure Flow:
+Internet → Internet Gateway → Public Subnets → NAT Gateway → Private Subnets → EC2 / Lambda → CloudWatch → SNS / EventBridge.
+
+Design Implementation:
+
+VPC: 10.0.0.0/16 CIDR block for isolated networking.
+
+Subnets: Multi-AZ distribution for high availability.
+
+Security: Private compute only; controlled outbound access via NAT Gateway.
+
+Automation: EventBridge triggers and Lambda functions for event-based logic.
+
+🚀 3. Deployment & Execution Guide
+Step 1: Execute IaC (Infrastructure Creation)
+To provision the VPC, subnets, IAM roles, and CloudWatch Event Rules:
+
+Initialize: Run terraform init to set up the backend and providers.
+
+Validate: Run terraform validate to ensure syntax accuracy.
+
+Plan: Run terraform plan to preview the infrastructure changes.
+
+Apply: Run terraform apply -auto-approve to deploy the resources.
+
+Step 2: Deploy Lambda Function Code
+The Lambda code deployment is handled via the lambda.tf manifest:
+
+Code is packaged into a .zip file.
+
+The aws_lambda_function resource uploads the package to AWS.
+
+Execution roles and permissions are automatically attached during the terraform apply phase.
+
+Step 3: Configure Lambda for VPC Access
+To run the Lambda within the VPC (e.g., to access private EC2 or databases), the function is configured in lambda.tf with a vpc_config block:
+
+Subnet IDs: The function is assigned to the private_subnets defined in networking.tf.
+
+Security Group IDs: A dedicated Security Group is attached to the Lambda, allowing restricted communication within the VPC and outbound access via the NAT Gateway.
+
+📊 4. Monitoring & Operational Health
+Execution and health are monitored via the integration defined in cloudwatch.tf and sns.tf:
+
+CloudWatch Logs: All Lambda stdout and stderr are captured in Log Groups for troubleshooting.
+
+CloudWatch Metrics: We track standard metrics such as Invocations, Duration, Errors, and Throttles.
+
+Alerting: CloudWatch Alarms trigger SNS notifications if error thresholds are exceeded.
+
+Automation: EventBridge rules monitor system events to trigger the Lambda for scheduled or event-driven tasks.
+
+📝 5. Implementation Assumptions
+AWS Region: Defaults to the region specified in variables.tf (standardized as us-east-1 or us-west-2).
+
+Backend Prep: Assumes the S3 bucket and DynamoDB table for remote state already exist (manual one-time setup).
+
+GitHub OIDC: Assumes a GitHub repository is connected via OIDC for credential-less CI/CD.
+
 # 🚀 Enterprise AWS Terraform Infrastructure Platform
 
 *Last Updated: 2026-02-26 07:01:19 UTC*
