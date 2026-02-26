@@ -111,6 +111,8 @@ When alarm state = ALARM:
 
 # 🛠 Deployment Steps
 
+# Please add required secrets in secrets and varibales section inside the repositroy without forget. 
+
 ## Step 1 – Clone Repository
 
 ```bash
