@@ -1,60 +1,119 @@
 import boto3
 import logging
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 
-# Set up logging
 logger = logging.getLogger()
 logger.setLevel(logging.INFO)
 
+ec2 = boto3.client("ec2")
+
+# Configuration
+RETENTION_DAYS = 365
+DRY_RUN = True   # 🔴 Change to False to enable actual deletion
+
+
 def lambda_handler(event, context):
-    """
-    Main Lambda handler to find and delete EC2 snapshots older than one year.
-    """
-    # 1. Connect to the AWS EC2 service
-    ec2 = boto3.client('ec2')
-    
-    # Calculate the cutoff date (365 days ago from now)
-    # We use timezone-aware objects to match the AWS StartTime format
-    now = datetime.now(timezone.utc)
-    cutoff_date = now - timedelta(days=365)
-    
-    deleted_count = 0
-    error_count = 0
-
     try:
-        # 2. Retrieves a list of all EC2 snapshots owned by the account
-        # 'self' ensures we don't try to delete public snapshots owned by others
-        response = ec2.describe_snapshots(OwnerIds=['self'])
-        snapshots = response.get('Snapshots', [])
-        
-        logger.info(f"Found {len(snapshots)} total snapshots owned by this account.")
+        logger.info("Starting EC2 & Snapshot audit process")
 
-        for snapshot in snapshots:
-            snapshot_id = snapshot['SnapshotId']
-            start_time = snapshot['StartTime']
+        ############################################
+        # 1️⃣ Handle Snapshots (Paginated)
+        ############################################
 
-            # 3. Filters snapshots older than one year
-            if start_time < cutoff_date:
-                try:
-                    # 4. & 5. Logs and attempts to delete identified old snapshots
-                    logger.info(f"Deleting snapshot: {snapshot_id} (Created: {start_time})")
-                    ec2.delete_snapshot(SnapshotId=snapshot_id)
-                    deleted_count += 1
-                    
-                except Exception as e:
-                    # 6. Basic error handling for specific deletion API calls
-                    # (e.g., if the snapshot is currently in use by an AMI)
-                    logger.error(f"Failed to delete {snapshot_id}: {str(e)}")
-                    error_count += 1
+        snapshot_paginator = ec2.get_paginator("describe_snapshots")
 
-        logger.info(f"Cleanup complete. Deleted: {deleted_count}, Errors: {error_count}")
+        snapshot_pages = snapshot_paginator.paginate(
+            OwnerIds=["self"],
+            PaginationConfig={"PageSize": 50}
+        )
+
+        total_snapshots = 0
+
+        for page in snapshot_pages:
+            for snapshot in page.get("Snapshots", []):
+                total_snapshots += 1
+                logger.info(f"Snapshot found: {snapshot['SnapshotId']}")
+
+        logger.info(f"Total Snapshots Found: {total_snapshots}")
+
+        ############################################
+        # 2️⃣ Handle EC2 Instances (Paginated)
+        ############################################
+
+        instance_paginator = ec2.get_paginator("describe_instances")
+
+        instance_pages = instance_paginator.paginate(
+            PaginationConfig={"PageSize": 50}
+        )
+
+        terminated_instances = []
+        total_instances = 0
+
+        for page in instance_pages:
+            for reservation in page.get("Reservations", []):
+                for instance in reservation.get("Instances", []):
+
+                    total_instances += 1
+
+                    instance_id = instance["InstanceId"]
+                    launch_time = instance["LaunchTime"]
+                    state = instance["State"]["Name"]
+
+                    logger.info(f"Checking instance: {instance_id} | State: {state}")
+
+                    # Only consider running or stopped instances
+                    if state in ["running", "stopped"]:
+
+                        age_days = (datetime.now(timezone.utc) - launch_time).days
+
+                        if age_days > RETENTION_DAYS:
+                            logger.warning(
+                                f"Instance {instance_id} is {age_days} days old."
+                            )
+
+                            if not DRY_RUN:
+                                ec2.terminate_instances(
+                                    InstanceIds=[instance_id]
+                                )
+
+                            terminated_instances.append(instance_id)
+
+        logger.info(f"Total Instances Checked: {total_instances}")
+        logger.info(f"Instances Marked for Termination: {len(terminated_instances)}")
+
+        return {
+            "statusCode": 200,
+            "body": {
+                "total_snapshots": total_snapshots,
+                "total_instances_checked": total_instances,
+                "terminated_instances": terminated_instances,
+                "dry_run": DRY_RUN
+            }
+        }
 
     except Exception as e:
-        # 6. Basic error handling for the initial describe_snapshots call
-        logger.error(f"Fatal error during snapshot retrieval: {str(e)}")
+        logger.error(f"Error occurred: {str(e)}")
         raise e
+ # -----------------------------
+    # Send SNS Notification
+    # -----------------------------
+    message = f"""
+Environment: {os.environ['ENVIRONMENT']}
+
+Deleted Instances:
+{deleted_instances}
+
+Deleted Snapshots:
+{deleted_snapshots}
+"""
+
+    sns.publish(
+        TopicArn=SNS_TOPIC_ARN,
+        Subject="EC2 & Snapshot Cleanup Report",
+        Message=message
+    )
 
     return {
-        'statusCode': 200,
-        'body': f"Successfully processed snapshots. Deleted: {deleted_count}"
+        "statusCode": 200,
+        "body": "Cleanup Completed"
     }

@@ -69,7 +69,7 @@ Backend Prep: Assumes the S3 bucket and DynamoDB table for remote state already 
 
 GitHub OIDC: Assumes a GitHub repository is connected via OIDC for credential-less CI/CD.
 
-# 🚀 Enterprise AWS Terraform Infrastructure Platform
+#  Enterprise AWS Terraform Infrastructure Platform
 
 *Last Updated: 2026-02-26 07:01:19 UTC*
 

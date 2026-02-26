@@ -3,7 +3,7 @@
 ############################################
 
 terraform {
-  required_version = ">= 1.6.0"
+  required_version = ">= 1.5.0"
 
   required_providers {
     aws = {
@@ -12,43 +12,30 @@ terraform {
     }
   }
 
-  ############################################
-  # Remote Backend Configuration
-  ############################################
+  ##########################################
+  # Remote Backend (Single Account, 1 Region)
+  ##########################################
   backend "s3" {
-    bucket         = "my-terraform-prod-state-bucket"
-    key            = "prod/terraform.tfstate"
-    region         = "us-east-1"
-    dynamodb_table = "terraform-lock-table"
+    bucket         = "my-terraform-remote-state-bucket"
+    key            = "lambda-vpc/${var.environment}/terraform.tfstate"
+    region         = "ap-south-1"
+    dynamodb_table = "terraform-state-lock"
     encrypt        = true
   }
 }
 
 ############################################
-# AWS Provider Configuration (Single Region)
+# AWS Provider
 ############################################
 
 provider "aws" {
-  region = var.aws_region
+  region = var.region
 
-  ############################################
-  # Default Tags - Enterprise Standard
-  ############################################
   default_tags {
     tags = {
-      Project     = var.project_name
       Environment = var.environment
+      Project     = "lambda-vpc-project"
       ManagedBy   = "Terraform"
-      Owner       = "DevOps-Team"
-      CostCenter  = "Cloud"
     }
   }
 }
-
-############################################
-# Data Sources
-############################################
-
-data "aws_caller_identity" "current" {}
-
-data "aws_region" "current" {}

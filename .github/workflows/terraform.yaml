@@ -12,101 +12,110 @@ permissions:
 env:
   AWS_REGION: ap-south-1
   TF_VERSION: 1.6.6
+  PROJECT_NAME: infra-automation
+  ACCOUNT_ID: 123456789012
 
 concurrency:
   group: terraform-${{ github.ref }}
   cancel-in-progress: false
 
 jobs:
-  terraform:
-    name: Terraform CI/CD Secure
-    runs-on: ubuntu-latest
-    environment: production
 
-    defaults:
-      run:
-        working-directory: terraform
+  terraform-plan:
+    name: Terraform Plan
+    runs-on: ubuntu-latest
+
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - branch: main
+            environment: dev
+          - branch: stage
+            environment: stage
+          - branch: release
+            environment: prod
+
+    if: ${{ github.ref_name == 'main' || github.ref_name == 'stage' || github.ref_name == 'release' || github.event_name == 'pull_request' }}
+    environment: ${{ matrix.environment }}
 
     steps:
+      - name: Checkout
+        uses: actions/checkout@v4
 
-    ############################################
-    #  Checkout
-    ############################################
-    - name: Checkout Repository
-      uses: actions/checkout@v4
+      # Enforce Terraform Formatting
+      - name: Terraform Format Check
+        uses: hashicorp/setup-terraform@v3
+      - run: terraform fmt -check -recursive
 
-    ############################################
-    #  Setup Terraform
-    ############################################
-    - name: Setup Terraform
-      uses: hashicorp/setup-terraform@v3
-      with:
-        terraform_version: ${{ env.TF_VERSION }} # please add environment variable for terraform version in env section inside a repositorysections.
+      # Terraform Init Backend
+      - name: Configure AWS (OIDC)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::${{ env.ACCOUNT_ID }}:role/${{ env.PROJECT_NAME }}-${{ matrix.environment }}-github-actions-role
+          aws-region: ${{ env.AWS_REGION }}
 
-    ############################################
-    # Terraform Format Check
-    ############################################
-    - name: Terraform Format Check
-      run: terraform fmt -check -recursive
+      - name: Terraform Init
+        run: terraform init -backend-config=backend-${{ matrix.environment }}.hcl
 
-    ############################################
-    #  Terraform Init
-    ############################################
-    - name: Terraform Init
-      run: terraform init -input=false
+      - name: Terraform Validate
+        run: terraform validate
 
-    ############################################
-    # Terraform Validate
-    ############################################
-    - name: Terraform Validate
-      run: terraform validate
+      # Security Scan
+      - name: Run tfsec (Security Scan)
+        uses: aquasecurity/tfsec-action@v1.0.3
 
-    ############################################
-    #  Checkov Security Scan
-    ############################################
-    - name: Run Checkov
-      uses: bridgecrewio/checkov-action@v12
-      with:
-        directory: terraform
-        framework: terraform
-        quiet: true
-        soft_fail: false
+      - name: Terraform Plan
+        run: |
+          terraform plan \
+            -var-file=${{ matrix.environment }}.tfvars \
+            -out=tfplan
 
-    ############################################
-    #  Configure AWS via OIDC
-    ############################################
-    - name: Configure AWS Credentials
-      uses: aws-actions/configure-aws-credentials@v4
-      with:
-        role-to-assume: ${{ secrets.AWS_GITHUB_ROLE_ARN }} # please add environment variable for AWS_GITHUB_ROLE_ARN in secrets section inside a repository.
-        aws-region: ${{ env.AWS_REGION }} # please add environment variable for AWS_REGION in env section inside a repository.
-        role-session-name: terraform-session
+      - name: Upload Plan Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: tfplan-${{ matrix.environment }}
+          path: tfplan
 
-    ############################################
-    #  Terraform Plan
-    ############################################
-    - name: Terraform Plan
-      run: |
-        terraform plan \
-          -out=tfplan \
-          -input=false \
-          -var="environment=${{ github.ref_name }}" 
-          -var="alert_email=${{ secrets.ALERT_EMAIL }}" 
-          -var="github_actions_role_arn=${{ secrets.AWS_GITHUB_ROLE_ARN }}" 
 
-    ############################################
-    # Upload Plan Artifact (Audit Ready)
-    ############################################
-    - name: Upload Plan Artifact
-      uses: actions/upload-artifact@v4
-      with:
-        name: terraform-plan
-        path: terraform/tfplan
+  terraform-apply:
+    name: Terraform Apply
+    needs: terraform-plan
+    runs-on: ubuntu-latest
 
-    ############################################
-    #  Terraform Apply (Main Only)
-    ############################################
-    - name: Terraform Apply
-      if: github.ref == 'refs/heads/main' # only apply changes when the branch is main, for other branches it will just do plan and upload the plan as artifact for audit and review.
-      run: |
-        terraform apply -auto-approve tfplan
+    strategy:
+      matrix:
+        include:
+          - branch: main
+            environment: dev
+          - branch: stage
+            environment: stage
+          - branch: release
+            environment: prod
+
+    if: github.event_name == 'push'
+
+    # GitHub Environment Protection (Enable approval for prod)
+    environment:
+      name: ${{ matrix.environment }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Download Plan
+        uses: actions/download-artifact@v4
+        with:
+          name: tfplan-${{ matrix.environment }}
+
+      - name: Configure AWS (OIDC)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::${{ env.ACCOUNT_ID }}:role/${{ env.PROJECT_NAME }}-${{ matrix.environment }}-github-actions-role
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Terraform Init
+        run: terraform init -backend-config=backend-${{ matrix.environment }}.hcl
+
+      - name: Terraform Apply
+        run: terraform apply -auto-approve tfplan
