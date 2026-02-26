@@ -68,8 +68,7 @@ jobs:
       - name: Terraform Plan
         run: |
           terraform plan \
-            -var-file=${{ matrix.environment }}.tfvars \
-            -out=tfplan
+          -var-file=env/${{ matrix.environment }}/${{ matrix.environment }}.tfvars -out plan.tfplan
 
       - name: Upload Plan Artifact
         uses: actions/upload-artifact@v4
@@ -119,3 +118,8 @@ jobs:
 
       - name: Terraform Apply
         run: terraform apply -auto-approve tfplan
+          # Step 9: Optional Notification (SNS / Slack)
+      # -----------------------------
+      - name: Notify Deployment Complete
+        if: success()
+        run: echo "Terraform deployment for ${{ matrix.environment }} completed successfully"
