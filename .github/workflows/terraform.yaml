@@ -41,7 +41,7 @@ jobs:
     - name: Setup Terraform
       uses: hashicorp/setup-terraform@v3
       with:
-        terraform_version: ${{ env.TF_VERSION }}
+        terraform_version: ${{ env.TF_VERSION }} # please add environment variable for terraform version in env section inside a repositorysections.
 
     ############################################
     # Terraform Format Check
@@ -78,8 +78,8 @@ jobs:
     - name: Configure AWS Credentials
       uses: aws-actions/configure-aws-credentials@v4
       with:
-        role-to-assume: ${{ secrets.AWS_GITHUB_ROLE_ARN }}
-        aws-region: ${{ env.AWS_REGION }}
+        role-to-assume: ${{ secrets.AWS_GITHUB_ROLE_ARN }} # please add environment variable for AWS_GITHUB_ROLE_ARN in secrets section inside a repository.
+        aws-region: ${{ env.AWS_REGION }} # please add environment variable for AWS_REGION in env section inside a repository.
         role-session-name: terraform-session
 
     ############################################
@@ -90,9 +90,9 @@ jobs:
         terraform plan \
           -out=tfplan \
           -input=false \
-          -var="environment=${{ github.ref_name }}" \
-          -var="alert_email=${{ secrets.ALERT_EMAIL }}" \
-          -var="github_actions_role_arn=${{ secrets.AWS_GITHUB_ROLE_ARN }}"
+          -var="environment=${{ github.ref_name }}" 
+          -var="alert_email=${{ secrets.ALERT_EMAIL }}" 
+          -var="github_actions_role_arn=${{ secrets.AWS_GITHUB_ROLE_ARN }}" 
 
     ############################################
     # Upload Plan Artifact (Audit Ready)
@@ -107,6 +107,6 @@ jobs:
     #  Terraform Apply (Main Only)
     ############################################
     - name: Terraform Apply
-      if: github.ref == 'refs/heads/main'
+      if: github.ref == 'refs/heads/main' # only apply changes when the branch is main, for other branches it will just do plan and upload the plan as artifact for audit and review.
       run: |
         terraform apply -auto-approve tfplan
