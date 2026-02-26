@@ -13,8 +13,6 @@ permissions:
 env:
   AWS_REGION: ap-south-1
   TF_VERSION: 1.6.6
-  ACCOUNT_ID: ${{ secrets.ACCOUNT_ID }}
-  PROJECT_NAME: ${{ secrets.PROJECT_NAME }}
 
 concurrency:
   group: terraform-${{ github.ref }}
