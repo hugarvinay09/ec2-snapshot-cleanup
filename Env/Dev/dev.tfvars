@@ -1,36 +1,77 @@
-##################################
-# DEV Environment Variables
-##################################
+###############################################################
+# DEV Environment Main
+###############################################################
 
-# General
-project          = "my-project"
-environment      = "dev"
-region           = "ap-south-1"
+module "networking" {
+  source      = "../../modules/networking"
+  project     = var.project
+  environment = var.environment
 
-# Networking
-vpc_cidr         = "10.0.0.0/16"
-public_subnets   = ["10.0.1.0/24"]
-private_subnets  = ["10.0.2.0/24"]
-nat_enabled      = true
-enable_flow_logs = true
+  vpc_cidr       = var.vpc_cidr
+  public_subnets = var.public_subnets
+  private_subnets= var.private_subnets
+  nat_enabled    = var.nat_enabled
+}
 
-# EC2
-instance_type     = "t3.micro"
-desired_capacity  = 1
-ami_id            = "ami-0abcdef1234567890" # example, replace with region AMI
-user_data_file    = "user-data.sh"
+module "iam" {
+  source      = "../../modules/iam"
+  project     = var.project
+  environment = var.environment
+}
 
-# Lambda
-lambda_memory_size = 128
+module "iam_policy" {
+  source      = "../../modules/iam-policy"
+  project     = var.project
+  environment = var.environment
+}
 
-# SNS
-sns_topic_name = "my-project-dev-alerts"
+module "github_oidc" {
+  source      = "../../modules/github-oidc"
+  project     = var.project
+  environment = var.environment
+  role_name   = var.github_oidc_role_name
+}
 
-# CloudWatch
-alarm_threshold_errors = 0
+module "ec2" {
+  source          = "../../modules/ec2"
+  project         = var.project
+  environment     = var.environment
+  instance_type   = var.instance_type
+  ami_id          = var.ami_id
+  subnet_ids      = module.networking.private_subnets
+  security_groups = module.networking.security_groups
+  user_data_file  = var.user_data_file
+  desired_capacity= var.desired_capacity
+}
 
-# EventBridge
-eventbridge_schedule = "rate(1 day)"
+module "lambda" {
+  source          = "../../modules/lambda"
+  project         = var.project
+  environment     = var.environment
+  memory_size     = var.lambda_memory_size
+  subnet_ids      = module.networking.private_subnets
+  security_groups = module.networking.lambda_sg
+}
 
-# IAM/GitHub
-github_oidc_role_name = "dev-github-oidc-role"
+module "eventbridge" {
+  source      = "../../modules/eventbridge"
+  project     = var.project
+  environment = var.environment
+  lambda_arn  = module.lambda.lambda_arn
+  schedule    = var.eventbridge_schedule
+}
+
+module "cloudwatch" {
+  source      = "../../modules/cloudwatch"
+  project     = var.project
+  environment = var.environment
+  lambda_name = module.lambda.lambda_name
+  alarm_threshold_errors = var.alarm_threshold_errors
+}
+
+module "sns" {
+  source      = "../../modules/sns"
+  project     = var.project
+  environment = var.environment
+  topic_name  = var.sns_topic_name
+}

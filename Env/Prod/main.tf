@@ -1,67 +1,77 @@
 ###############################################################
-# PROD Environment Infrastructure
+# PROD Environment Main
 ###############################################################
 
 module "networking" {
   source      = "../../modules/networking"
-  environment = "prod"
   project     = var.project
+  environment = var.environment
+
+  vpc_cidr       = var.vpc_cidr
+  public_subnets = var.public_subnets
+  private_subnets= var.private_subnets
+  nat_enabled    = var.nat_enabled
 }
 
 module "iam" {
   source      = "../../modules/iam"
-  environment = "prod"
   project     = var.project
+  environment = var.environment
 }
 
 module "iam_policy" {
   source      = "../../modules/iam-policy"
-  environment = "prod"
   project     = var.project
+  environment = var.environment
 }
 
 module "github_oidc" {
   source      = "../../modules/github-oidc"
-  environment = "prod"
   project     = var.project
+  environment = var.environment
+  role_name   = var.github_oidc_role_name
 }
 
 module "ec2" {
   source          = "../../modules/ec2"
-  environment     = "prod"
   project         = var.project
+  environment     = var.environment
   instance_type   = var.instance_type
-  vpc_id          = module.networking.vpc_id
+  ami_id          = var.ami_id
   subnet_ids      = module.networking.private_subnets
   security_groups = module.networking.security_groups
+  user_data_file  = var.user_data_file
+  desired_capacity= var.desired_capacity
 }
 
 module "lambda" {
   source          = "../../modules/lambda"
-  environment     = "prod"
   project         = var.project
+  environment     = var.environment
+  memory_size     = var.lambda_memory_size
   subnet_ids      = module.networking.private_subnets
   security_groups = module.networking.lambda_sg
-  memory_size     = var.lambda_memory_size
 }
 
 module "eventbridge" {
   source      = "../../modules/eventbridge"
-  environment = "prod"
   project     = var.project
+  environment = var.environment
   lambda_arn  = module.lambda.lambda_arn
+  schedule    = var.eventbridge_schedule
 }
 
 module "cloudwatch" {
   source      = "../../modules/cloudwatch"
-  environment = "prod"
   project     = var.project
+  environment = var.environment
   lambda_name = module.lambda.lambda_name
+  alarm_threshold_errors = var.alarm_threshold_errors
 }
 
 module "sns" {
   source      = "../../modules/sns"
-  environment = "prod"
   project     = var.project
-  topic_name  = "${var.project}-prod-alerts"
+  environment = var.environment
+  topic_name  = var.sns_topic_name
 }
