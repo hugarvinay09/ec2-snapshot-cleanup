@@ -94,6 +94,7 @@ resource "aws_eip" "ec2_eip" {
   count    = var.create_public_ec2 ? 1 : 0
   instance = aws_instance.app_server.id
   domain   = "vpc"
+  user_data              = file("${path.module}/user-data.sh")
 
   tags = {
     Name        = "${var.environment}-ec2-eip"
