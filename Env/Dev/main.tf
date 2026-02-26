@@ -119,25 +119,3 @@ module "lambda" {
   security_groups = module.networking.lambda_sg
 }
 
-module "eventbridge" {
-  source      = "../../modules/eventbridge"
-  project     = var.project
-  environment = var.environment
-  lambda_arn  = module.lambda.lambda_arn
-  schedule    = var.eventbridge_schedule
-}
-
-module "cloudwatch" {
-  source      = "../../modules/cloudwatch"
-  project     = var.project
-  environment = var.environment
-  lambda_name = module.lambda.lambda_name
-  alarm_threshold_errors = var.alarm_threshold_errors
-}
-
-module "sns" {
-  source      = "../../modules/sns"
-  project     = var.project
-  environment = var.environment
-  topic_name  = var.sns_topic_name
-}
