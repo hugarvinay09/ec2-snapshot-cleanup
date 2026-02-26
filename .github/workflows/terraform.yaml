@@ -41,10 +41,7 @@ jobs:
             environment: prod
     
     # We must ensure the job only runs for the matrix row matching the current branch
-    if: |
-      (github.event_name == 'push' && github.ref_name == matrix.branch) ||
-      (github.event_name == 'pull_request' && github.base_ref == matrix.branch)
-
+    
     environment: ${{ matrix.environment }}
 
     steps:
