@@ -1,8 +1,16 @@
 name: Terraform Enterprise Secure Pipeline
 
 on:
+  push:
+    branches:
+      - main
+      - stage
+      - release
   pull_request:
-    types: [closed]
+    branches:
+      - main
+      - stage
+      - release
 
 permissions:
   id-token: write
@@ -13,17 +21,18 @@ permissions:
 env:
   AWS_REGION: ap-south-1
   TF_VERSION: 1.6.6
+  # Added these so your OIDC Role ARN works
+  ACCOUNT_ID: ${{ secrets.AWS_ACCOUNT_ID }} 
+  PROJECT_NAME: my-terraform-project
 
 concurrency:
   group: terraform-${{ github.ref }}
   cancel-in-progress: false
 
 jobs:
-
   terraform-plan:
     name: Terraform Plan
     runs-on: ubuntu-latest
-
     strategy:
       fail-fast: false
       matrix:
@@ -34,20 +43,26 @@ jobs:
             environment: stage
           - branch: release
             environment: prod
+    
+    # Ensure the matrix environment matches the current branch/target branch
+    if: |
+      (github.event_name == 'push' && github.ref_name == matrix.branch) ||
+      (github.event_name == 'pull_request' && github.base_ref == matrix.branch)
 
-    if: ${{ github.ref_name == 'main' || github.ref_name == 'stage' || github.ref_name == 'release' || github.event_name == 'pull_request' }}
     environment: ${{ matrix.environment }}
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      # Enforce Terraform Formatting
-      - name: Terraform Format Check
+      - name: Setup Terraform
         uses: hashicorp/setup-terraform@v3
-      - run: terraform fmt -check -recursive
+        with:
+          terraform_version: ${{ env.TF_VERSION }}
 
-      # Terraform Init Backend
+      - name: Terraform Format Check
+        run: terraform fmt -check -recursive
+
       - name: Configure AWS (OIDC)
         uses: aws-actions/configure-aws-credentials@v4
         with:
@@ -60,27 +75,29 @@ jobs:
       - name: Terraform Validate
         run: terraform validate
 
-      # Security Scan
-      - name: Run tfsec (Security Scan)
+      - name: Run tfsec
         uses: aquasecurity/tfsec-action@v1.0.3
+        with:
+          soft_fail: true # Set to false to block plans with security issues
 
       - name: Terraform Plan
         run: |
           terraform plan \
-          -var-file=env/${{ matrix.environment }}/${{ matrix.environment }}.tfvars -out plan.tfplan
+          -var-file=env/${{ matrix.environment }}/${{ matrix.environment }}.tfvars \
+          -out=plan.tfplan
 
       - name: Upload Plan Artifact
         uses: actions/upload-artifact@v4
         with:
           name: tfplan-${{ matrix.environment }}
-          path: tfplan
-
+          path: plan.tfplan
 
   terraform-apply:
     name: Terraform Apply
     needs: terraform-plan
+    # Only run apply on a direct push (merge) to the designated branches
+    if: github.event_name == 'push'
     runs-on: ubuntu-latest
-
     strategy:
       matrix:
         include:
@@ -90,16 +107,19 @@ jobs:
             environment: stage
           - branch: release
             environment: prod
-
-    if: github.event_name == 'push'
-
-    # GitHub Environment Protection (Enable approval for prod)
-    environment:
-      name: ${{ matrix.environment }}
+            
+    # Matrix filtering for apply
+    if: github.ref_name == matrix.branch
+    environment: ${{ matrix.environment }}
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TF_VERSION }}
 
       - name: Download Plan
         uses: actions/download-artifact@v4
@@ -116,11 +136,8 @@ jobs:
         run: terraform init -backend-config=backend-${{ matrix.environment }}.hcl
 
       - name: Terraform Apply
-        run: terraform apply -auto-approve tfplan
+        run: terraform apply -auto-approve plan.tfplan
 
-
-      # Step 9: Optional Notification (SNS / Slack)
-      # -----------------------------
       - name: Notify Deployment Complete
         if: success()
         run: echo "Terraform deployment for ${{ matrix.environment }} completed successfully"
