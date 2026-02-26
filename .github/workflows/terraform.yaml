@@ -40,7 +40,7 @@ jobs:
           - branch: release
             environment: prod
     
-    # Logic: Only run the matrix row that matches the current branch context
+    # Only run the matrix row that matches the current branch context
     if: |
       (github.event_name == 'push' && github.ref_name == matrix.branch) ||
       (github.event_name == 'pull_request' && github.base_ref == matrix.branch)
@@ -95,8 +95,7 @@ jobs:
   terraform-apply:
     name: Apply (${{ matrix.environment }})
     needs: terraform-plan
-    # Single IF statement: must be a push AND must match the matrix branch
-    if: github.event_name == 'push'
+    if: github.event_name == 'push' && github.ref_name == matrix.branch
     runs-on: ubuntu-latest
     strategy:
       matrix:
@@ -111,44 +110,32 @@ jobs:
     environment: ${{ matrix.environment }}
 
     steps:
-      # Guard step to ensure matrix execution matches the branch
-      - name: Check Branch Alignment
-        if: github.ref_name != matrix.branch
-        run: |
-          echo "Current branch ${{ github.ref_name }} does not match matrix branch ${{ matrix.branch }}. Skipping."
-          exit 0
-
       - name: Checkout Repository
         uses: actions/checkout@v4
-        if: github.ref_name == matrix.branch
 
       - name: Setup Terraform
         uses: hashicorp/setup-terraform@v3
-        if: github.ref_name == matrix.branch
         with:
           terraform_version: ${{ env.TF_VERSION }}
 
       - name: Download Plan Artifact
         uses: actions/download-artifact@v4
-        if: github.ref_name == matrix.branch
         with:
           name: tfplan-${{ matrix.environment }}
+          path: .
 
       - name: Configure AWS Credentials (OIDC)
         uses: aws-actions/configure-aws-credentials@v4
-        if: github.ref_name == matrix.branch
         with:
           role-to-assume: arn:aws:iam::${{ env.ACCOUNT_ID }}:role/${{ env.PROJECT_NAME }}-${{ matrix.environment }}-github-actions-role
           aws-region: ${{ env.AWS_REGION }}
 
       - name: Terraform Init
-        if: github.ref_name == matrix.branch
         run: terraform init -backend-config=backend-${{ matrix.environment }}.hcl
 
       - name: Terraform Apply
-        if: github.ref_name == matrix.branch
         run: terraform apply -auto-approve plan.tfplan
 
       - name: Notify Deployment Complete
-        if: success() && github.ref_name == matrix.branch
+        if: success()
         run: echo "Successfully deployed ${{ matrix.environment }} via Terraform."
