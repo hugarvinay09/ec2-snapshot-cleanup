@@ -1,34 +1,28 @@
-name: Terraform Enterprise Secure Pipeline
+name: Secure Terraform Pipeline
 
 on:
   push:
-    branches: [main, stage, release]
+    branches:
+      - main
+      - stage
+      - release
   pull_request:
-    branches: [main, stage, release]
 
 permissions:
   id-token: write
   contents: read
-  security-events: write
-  pull-requests: write
 
 env:
   AWS_REGION: ap-south-1
-  TF_VERSION: 1.6.6
-  ACCOUNT_ID: ${{ secrets.ACCOUNT_ID }}
-  PROJECT_NAME: my-terraform-project
-
-concurrency:
-  group: terraform-${{ github.ref }}
-  cancel-in-progress: false
+  PROJECT_NAME: infra-automation
+  ACCOUNT_ID: 123456789012
 
 jobs:
-  # --------------------------------------------------------------------
-  # Job 1: Terraform Plan
-  # --------------------------------------------------------------------
+
   terraform-plan:
-    name: Plan (${{ matrix.environment }})
+    name: Terraform Plan
     runs-on: ubuntu-latest
+
     strategy:
       fail-fast: false
       matrix:
@@ -39,24 +33,21 @@ jobs:
             environment: stage
           - branch: release
             environment: prod
-    
-    # We must ensure the job only runs for the matrix row matching the current branch
-    
+
+    if: github.ref_name == matrix.branch || github.event_name == 'pull_request'
     environment: ${{ matrix.environment }}
 
     steps:
-      - name: Checkout Repository
+      - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Setup Terraform
-        uses: hashicorp/setup-terraform@v3
-        with:
-          terraform_version: ${{ env.TF_VERSION }}
-
+      # Enforce Terraform Formatting
       - name: Terraform Format Check
-        run: terraform fmt -check -recursive
+        uses: hashicorp/setup-terraform@v3
+      - run: terraform fmt -check -recursive
 
-      - name: Configure AWS Credentials (OIDC)
+      # Terraform Init Backend
+      - name: Configure AWS (OIDC)
         uses: aws-actions/configure-aws-credentials@v4
         with:
           role-to-assume: arn:aws:iam::${{ env.ACCOUNT_ID }}:role/${{ env.PROJECT_NAME }}-${{ matrix.environment }}-github-actions-role
@@ -68,33 +59,28 @@ jobs:
       - name: Terraform Validate
         run: terraform validate
 
-      - name: Run tfsec Security Scan
+      # Security Scan
+      - name: Run tfsec (Security Scan)
         uses: aquasecurity/tfsec-action@v1.0.3
-        with:
-          soft_fail: true 
 
       - name: Terraform Plan
         run: |
           terraform plan \
-            -var-file=env/${{ matrix.environment }}/${{ matrix.environment }}.tfvars \
-            -out=plan.tfplan
+            -var-file=${{ matrix.environment }}.tfvars \
+            -out=tfplan
 
       - name: Upload Plan Artifact
         uses: actions/upload-artifact@v4
         with:
           name: tfplan-${{ matrix.environment }}
-          path: plan.tfplan
-          retention-days: 1
+          path: tfplan
 
-  # --------------------------------------------------------------------
-  # Job 2: Terraform Apply
-  # --------------------------------------------------------------------
+
   terraform-apply:
-    name: Apply (${{ matrix.environment }})
+    name: Terraform Apply
     needs: terraform-plan
-    # We combine the "push" check and the "branch match" check into ONE single 'if'
-    if: github.event_name == 'push'
     runs-on: ubuntu-latest
+
     strategy:
       matrix:
         include:
@@ -105,47 +91,29 @@ jobs:
           - branch: release
             environment: prod
 
-    environment: ${{ matrix.environment }}
+    if: github.event_name == 'push' && github.ref_name == matrix.branch
+
+    # GitHub Environment Protection (Enable approval for prod)
+    environment:
+      name: ${{ matrix.environment }}
 
     steps:
-      # Step-level guard to ensure we don't apply the wrong environment
-      - name: Validate Branch Match
-        if: github.ref_name != matrix.branch
-        run: |
-          echo "Branch ${{ github.ref_name }} does not match matrix branch ${{ matrix.branch }}. Skipping."
-          exit 0 
-
-      - name: Checkout Repository
+      - name: Checkout
         uses: actions/checkout@v4
-        if: github.ref_name == matrix.branch
 
-      - name: Setup Terraform
-        uses: hashicorp/setup-terraform@v3
-        if: github.ref_name == matrix.branch
-        with:
-          terraform_version: ${{ env.TF_VERSION }}
-
-      - name: Download Plan Artifact
+      - name: Download Plan
         uses: actions/download-artifact@v4
-        if: github.ref_name == matrix.branch
         with:
           name: tfplan-${{ matrix.environment }}
 
-      - name: Configure AWS Credentials (OIDC)
+      - name: Configure AWS (OIDC)
         uses: aws-actions/configure-aws-credentials@v4
-        if: github.ref_name == matrix.branch
         with:
           role-to-assume: arn:aws:iam::${{ env.ACCOUNT_ID }}:role/${{ env.PROJECT_NAME }}-${{ matrix.environment }}-github-actions-role
           aws-region: ${{ env.AWS_REGION }}
 
       - name: Terraform Init
-        if: github.ref_name == matrix.branch
         run: terraform init -backend-config=backend-${{ matrix.environment }}.hcl
 
       - name: Terraform Apply
-        if: github.ref_name == matrix.branch
-        run: terraform apply -auto-approve plan.tfplan
-
-      - name: Notify Deployment Complete
-        if: success() && github.ref_name == matrix.branch
-        run: echo "Successfully deployed ${{ matrix.environment }} via Terraform."
+        run: terraform apply -auto-approve tfplan
