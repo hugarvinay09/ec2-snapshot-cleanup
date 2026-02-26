@@ -2,15 +2,9 @@ name: Terraform Enterprise Secure Pipeline
 
 on:
   push:
-    branches:
-      - main
-      - stage
-      - release
+    branches: [main, stage, release]
   pull_request:
-    branches:
-      - main
-      - stage
-      - release
+    branches: [main, stage, release]
 
 permissions:
   id-token: write
@@ -21,8 +15,7 @@ permissions:
 env:
   AWS_REGION: ap-south-1
   TF_VERSION: 1.6.6
-  # Added these so your OIDC Role ARN works
-  ACCOUNT_ID: ${{ secrets.AWS_ACCOUNT_ID }} 
+  ACCOUNT_ID: ${{ secrets.ACCOUNT_ID }}
   PROJECT_NAME: my-terraform-project
 
 concurrency:
@@ -30,8 +23,11 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  # --------------------------------------------------------------------
+  # Job 1: Terraform Plan
+  # --------------------------------------------------------------------
   terraform-plan:
-    name: Terraform Plan
+    name: Plan (${{ matrix.environment }})
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -44,7 +40,7 @@ jobs:
           - branch: release
             environment: prod
     
-    # Ensure the matrix environment matches the current branch/target branch
+    # Logic: Only run the matrix row that matches the current branch
     if: |
       (github.event_name == 'push' && github.ref_name == matrix.branch) ||
       (github.event_name == 'pull_request' && github.base_ref == matrix.branch)
@@ -63,7 +59,7 @@ jobs:
       - name: Terraform Format Check
         run: terraform fmt -check -recursive
 
-      - name: Configure AWS (OIDC)
+      - name: Configure AWS Credentials (OIDC)
         uses: aws-actions/configure-aws-credentials@v4
         with:
           role-to-assume: arn:aws:iam::${{ env.ACCOUNT_ID }}:role/${{ env.PROJECT_NAME }}-${{ matrix.environment }}-github-actions-role
@@ -75,28 +71,31 @@ jobs:
       - name: Terraform Validate
         run: terraform validate
 
-      - name: Run tfsec
+      - name: Run tfsec Security Scan
         uses: aquasecurity/tfsec-action@v1.0.3
         with:
-          soft_fail: true # Set to false to block plans with security issues
+          soft_fail: true 
 
       - name: Terraform Plan
         run: |
           terraform plan \
-          -var-file=env/${{ matrix.environment }}/${{ matrix.environment }}.tfvars \
-          -out=plan.tfplan
+            -var-file=env/${{ matrix.environment }}/${{ matrix.environment }}.tfvars \
+            -out=plan.tfplan
 
       - name: Upload Plan Artifact
         uses: actions/upload-artifact@v4
         with:
           name: tfplan-${{ matrix.environment }}
           path: plan.tfplan
+          retention-days: 1
 
+  # --------------------------------------------------------------------
+  # Job 2: Terraform Apply
+  # --------------------------------------------------------------------
   terraform-apply:
-    name: Terraform Apply
+    name: Apply (${{ matrix.environment }})
     needs: terraform-plan
-    # Only run apply on a direct push (merge) to the designated branches
-    if: github.event_name == 'push'
+    if: github.event_name == 'push' # Apply only on merges/pushes
     runs-on: ubuntu-latest
     strategy:
       matrix:
@@ -107,8 +106,8 @@ jobs:
             environment: stage
           - branch: release
             environment: prod
-            
-    # Matrix filtering for apply
+
+    # Logic: Ensure we only apply to the specific environment for this branch
     if: github.ref_name == matrix.branch
     environment: ${{ matrix.environment }}
 
@@ -121,12 +120,12 @@ jobs:
         with:
           terraform_version: ${{ env.TF_VERSION }}
 
-      - name: Download Plan
+      - name: Download Plan Artifact
         uses: actions/download-artifact@v4
         with:
           name: tfplan-${{ matrix.environment }}
 
-      - name: Configure AWS (OIDC)
+      - name: Configure AWS Credentials (OIDC)
         uses: aws-actions/configure-aws-credentials@v4
         with:
           role-to-assume: arn:aws:iam::${{ env.ACCOUNT_ID }}:role/${{ env.PROJECT_NAME }}-${{ matrix.environment }}-github-actions-role
@@ -140,4 +139,4 @@ jobs:
 
       - name: Notify Deployment Complete
         if: success()
-        run: echo "Terraform deployment for ${{ matrix.environment }} completed successfully"
+        run: echo "Successfully deployed ${{ matrix.environment }} via Terraform."
