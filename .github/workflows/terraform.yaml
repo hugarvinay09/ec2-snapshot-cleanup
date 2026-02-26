@@ -1,39 +1,112 @@
-name: Terraform Deploy
+name: Terraform Enterprise Secure Pipeline
 
 on:
-  push:
-    branches:
-      - main
+  workflow_dispatch:
 
 permissions:
   id-token: write
   contents: read
+  security-events: write
+  pull-requests: write
+
+env:
+  AWS_REGION: ap-south-1
+  TF_VERSION: 1.6.6
+
+concurrency:
+  group: terraform-${{ github.ref }}
+  cancel-in-progress: false
 
 jobs:
   terraform:
+    name: Terraform CI/CD Secure
     runs-on: ubuntu-latest
+    environment: production
+
+    defaults:
+      run:
+        working-directory: terraform
 
     steps:
-      - name: Checkout Code
-        uses: actions/checkout@v4
 
-      - name: Configure AWS Credentials (OIDC)
-        uses: aws-actions/configure-aws-credentials@v4
-        with:
-          role-to-assume: arn:aws:iam::YOUR_ACCOUNT_ID:role/github-actions-terraform-role
-          aws-region: us-east-1
+    ############################################
+    #  Checkout
+    ############################################
+    - name: Checkout Repository
+      uses: actions/checkout@v4
 
-      - name: Setup Terraform
-        uses: hashicorp/setup-terraform@v3
+    ############################################
+    #  Setup Terraform
+    ############################################
+    - name: Setup Terraform
+      uses: hashicorp/setup-terraform@v3
+      with:
+        terraform_version: ${{ env.TF_VERSION }}
 
-      - name: Zip Lambda
-        run: |
-          cd lambda
-          zip ../lambda.zip lambda_function.py
-          cd ..
+    ############################################
+    # Terraform Format Check
+    ############################################
+    - name: Terraform Format Check
+      run: terraform fmt -check -recursive
 
-      - name: Terraform Init
-        run: terraform init
+    ############################################
+    #  Terraform Init
+    ############################################
+    - name: Terraform Init
+      run: terraform init -input=false
 
-      - name: Terraform Apply
-        run: terraform apply -auto-approve
+    ############################################
+    # Terraform Validate
+    ############################################
+    - name: Terraform Validate
+      run: terraform validate
+
+    ############################################
+    #  Checkov Security Scan
+    ############################################
+    - name: Run Checkov
+      uses: bridgecrewio/checkov-action@v12
+      with:
+        directory: terraform
+        framework: terraform
+        quiet: true
+        soft_fail: false
+
+    ############################################
+    #  Configure AWS via OIDC
+    ############################################
+    - name: Configure AWS Credentials
+      uses: aws-actions/configure-aws-credentials@v4
+      with:
+        role-to-assume: ${{ secrets.AWS_GITHUB_ROLE_ARN }}
+        aws-region: ${{ env.AWS_REGION }}
+        role-session-name: terraform-session
+
+    ############################################
+    #  Terraform Plan
+    ############################################
+    - name: Terraform Plan
+      run: |
+        terraform plan \
+          -out=tfplan \
+          -input=false \
+          -var="environment=${{ github.ref_name }}" \
+          -var="alert_email=${{ secrets.ALERT_EMAIL }}" \
+          -var="github_actions_role_arn=${{ secrets.AWS_GITHUB_ROLE_ARN }}"
+
+    ############################################
+    # Upload Plan Artifact (Audit Ready)
+    ############################################
+    - name: Upload Plan Artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: terraform-plan
+        path: terraform/tfplan
+
+    ############################################
+    #  Terraform Apply (Main Only)
+    ############################################
+    - name: Terraform Apply
+      if: github.ref == 'refs/heads/main'
+      run: |
+        terraform apply -auto-approve tfplan
